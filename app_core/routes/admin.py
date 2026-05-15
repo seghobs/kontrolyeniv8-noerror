@@ -1,0 +1,763 @@
+import html
+import json
+import logging
+
+from flask import Blueprint, redirect, render_template, request, session, url_for
+
+from app_core.api_response import api_response
+from app_core.config import ADMIN_PASSWORD
+from app_core.instagram_api import fetch_current_user, validate_token
+from app_core.storage import (
+    add_audit_log,
+    count_tokens,
+    get_audit_logs,
+    get_audit_relogin_count,
+    load_exemptions,
+    load_exemptions_grouped,
+    load_global_exemptions,
+    add_global_exemption,
+    remove_global_exemption,
+    load_tokens,
+    save_exemptions,
+    save_tokens,
+    hard_delete_token,
+    restore_token,
+)
+from app_core.token_service import clear_logout_state, relogin_saved_user, get_working_active_token
+from app_core.instagram_api import fetch_group_threads, fetch_own_thread_items, delete_thread_item
+from app_core.automation import load_automations, save_automations
+from app_core.validators import is_valid_android_id, is_valid_device_id, is_valid_post_link, is_valid_username
+
+logger = logging.getLogger(__name__)
+
+admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def _require_admin():
+    if not session.get("admin_logged_in"):
+        return api_response(False, "UNAUTHORIZED", "Yetkisiz erisim", http_status=401)
+    return None
+
+
+def _normalize_post_link(value):
+    return html.unescape(str(value or "").strip())
+
+
+@admin_bp.route("", methods=["GET"])
+@admin_bp.route("/", methods=["GET"])
+def panel():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    return render_template("admin.html")
+
+
+@admin_bp.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get("password")
+        if password == ADMIN_PASSWORD:
+            session["admin_logged_in"] = True
+            logger.info("Admin girisi basarili.")
+            return redirect(url_for("admin.panel"))
+        logger.warning("Hatali admin giris denemesi.")
+        return render_template("admin_login.html", error=True)
+    return render_template("admin_login.html", error=False)
+
+
+@admin_bp.route("/logout", methods=["GET"])
+def logout():
+    session.pop("admin_logged_in", None)
+    return redirect(url_for("admin.login"))
+
+
+@admin_bp.route("/get_tokens", methods=["GET"])
+def get_tokens_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    username = request.args.get("username", "").strip() or None
+    if username:
+        all_tokens = load_tokens(include_deleted=True)
+        one = next((t for t in all_tokens if t.get("username") == username), None)
+        if not one:
+            return api_response(False, "NOT_FOUND", "Token bulunamadi", http_status=404)
+        return api_response(True, "OK", "Basarili", extra={"tokens": [one], "total": 1, "page": 1, "page_size": 1})
+    search = request.args.get("search", "").strip() or None
+    page = request.args.get("page", type=int)
+    page_size = request.args.get("page_size", type=int)
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    tokens = load_tokens(include_deleted=include_deleted, search=search, page=page, page_size=page_size)
+    total = count_tokens(include_deleted=include_deleted, search=search)
+    deleted_count = count_tokens(include_deleted=True, search=search) - count_tokens(include_deleted=False, search=search) if not include_deleted else 0
+    return api_response(
+        True,
+        "OK",
+        "Basarili",
+        extra={
+            "tokens": tokens,
+            "total": total,
+            "page": page or 1,
+            "page_size": page_size or 0,
+            "deleted_count": max(0, deleted_count),
+        },
+    )
+
+
+@admin_bp.route("/add_token", methods=["POST"])
+def add_token():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    try:
+        data = request.get_json() or {}
+        required_fields = ["token", "android_id", "user_agent", "device_id", "password"]
+        if not all(str(data.get(field, "")).strip() for field in required_fields):
+            return api_response(False, "MISSING_FIELDS", "Tum alanlar zorunlu")
+
+        if not is_valid_android_id(data["android_id"]):
+            return api_response(False, "INVALID_ANDROID_ID", "Gecersiz Android ID formati (16 haneli hex bekleniyor)")
+
+        if not is_valid_device_id(data["device_id"]):
+            return api_response(False, "INVALID_DEVICE_ID", "Gecersiz Device ID formati")
+
+        response = fetch_current_user(
+            token=data["token"],
+            user_agent=data["user_agent"],
+            android_id=data["android_id"],
+            device_id=data["device_id"],
+            timeout=5,
+        )
+        if response.status_code != 200:
+            return api_response(False, "INVALID_TOKEN", "Token gecersiz")
+
+        user_data = response.json().get("user", {})
+        username = user_data.get("username")
+        full_name = user_data.get("full_name", "")
+        if not username:
+            return api_response(False, "NO_USERNAME", "Kullanici adi alinamadi")
+
+        from datetime import datetime
+
+        tokens = load_tokens()
+        
+        # Once a new token is added, deactivate ALL old tokens for this username
+        for t in tokens:
+            if t.get("username") == username:
+                t["is_active"] = False
+        
+        new_token = {
+            "username": username,
+            "full_name": full_name,
+            "password": data["password"].strip(),
+            "token": data["token"],
+            "android_id_yeni": data["android_id"],
+            "user_agent": data["user_agent"],
+            "device_id": data["device_id"],
+            "is_active": data.get("is_active", True),
+            "added_at": data.get("added_at", str(datetime.now())),
+        }
+
+        replaced = False
+        for idx, token in enumerate(tokens):
+            if token.get("username") == username:
+                tokens[idx] = new_token
+                replaced = True
+                break
+        if not replaced:
+            tokens.append(new_token)
+
+        save_tokens(tokens)
+        action = "guncellendi" if replaced else "eklendi"
+        add_audit_log("token", username, f"token_{action}", f"@{username} icin token {action}")
+        logger.info("Token %s: @%s", action, username)
+
+        return api_response(
+            True,
+            "TOKEN_ADDED",
+            f"@{username} ({full_name}) icin token {action}",
+            extra={"username": username, "full_name": full_name},
+        )
+    except Exception as error:
+        logger.error("Token ekleme hatasi: %s", error)
+        return api_response(False, "ERROR", f"Token eklenemedi: {error}", http_status=500)
+
+
+@admin_bp.route("/delete_token", methods=["POST"])
+def delete_token():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "MISSING_USERNAME", "Kullanici adi belirtilmedi")
+
+    if not hard_delete_token(username):
+        return api_response(False, "ERROR", "Silme islemi basarisiz", http_status=500)
+    add_audit_log("token", username, "token_silindi")
+    return api_response(True, "DELETED", f"{username} sistemden tamamen silindi")
+
+
+@admin_bp.route("/restore_token", methods=["POST"])
+def restore_token_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "MISSING_USERNAME", "Kullanici adi belirtilmedi")
+
+    if not restore_token(username):
+        return api_response(False, "ERROR", "Geri alma islemi basarisiz", http_status=500)
+    add_audit_log("token", username, "token_geri_alindi")
+    return api_response(True, "RESTORED", f"@{username} geri alindi")
+
+
+@admin_bp.route("/toggle_token", methods=["POST"])
+def toggle_token():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "MISSING_USERNAME", "Kullanici adi belirtilmedi")
+
+    tokens = load_tokens()
+    for token in tokens:
+        if token.get("username") == username:
+            token["is_active"] = not token.get("is_active", False)
+            if token["is_active"]:
+                clear_logout_state(token)
+            save_tokens(tokens)
+            status = "aktif" if token["is_active"] else "pasif"
+            return api_response(
+                True,
+                "TOGGLED",
+                f"{username} icin token {status} yapildi",
+                extra={"is_active": token["is_active"]},
+            )
+
+    return api_response(False, "NOT_FOUND", "Token bulunamadi", http_status=404)
+
+
+@admin_bp.route("/update_token", methods=["POST"])
+def update_token():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    try:
+        data = request.get_json() or {}
+        required_fields = ["username", "token", "android_id", "user_agent", "device_id", "password"]
+        if not all(str(data.get(field, "")).strip() for field in required_fields):
+            return api_response(False, "MISSING_FIELDS", "Tum alanlar zorunlu")
+
+        if not is_valid_android_id(data["android_id"]):
+            return api_response(False, "INVALID_ANDROID_ID", "Gecersiz Android ID formati")
+
+        if not is_valid_device_id(data["device_id"]):
+            return api_response(False, "INVALID_DEVICE_ID", "Gecersiz Device ID formati")
+
+        validate_response = fetch_current_user(
+            token=data["token"],
+            user_agent=data["user_agent"],
+            android_id=data["android_id"],
+            device_id=data["device_id"],
+            timeout=5,
+        )
+        if validate_response.status_code != 200:
+            return api_response(False, "INVALID_TOKEN", "Yeni token gecersiz")
+
+        tokens = load_tokens()
+        for token in tokens:
+            if token.get("username") == data["username"]:
+                token["token"] = data["token"]
+                token["android_id_yeni"] = data["android_id"]
+                token["user_agent"] = data["user_agent"]
+                token["device_id"] = data["device_id"]
+                token["password"] = data["password"]
+                token["is_active"] = True
+                clear_logout_state(token)
+                save_tokens(tokens)
+                add_audit_log("token", data["username"], "token_guncellendi")
+                return api_response(True, "UPDATED", f"@{data['username']} icin token basariyla guncellendi")
+
+        return api_response(False, "NOT_FOUND", "Token bulunamadi", http_status=404)
+    except Exception as error:
+        logger.error("Token guncelleme hatasi: %s", error)
+        return api_response(False, "ERROR", f"Token guncellenemedi: {error}", http_status=500)
+
+
+@admin_bp.route("/relogin_token", methods=["POST"])
+def relogin_token():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "MISSING_USERNAME", "Kullanici adi belirtilmedi")
+
+    password_override = (data.get("password") or "").strip() or None
+    device_id_override = (data.get("device_id") or "").strip() or None
+    user_agent_override = (data.get("user_agent") or "").strip() or None
+    android_id_override = (data.get("android_id") or "").strip() or None
+    result = relogin_saved_user(
+        username,
+        password_override=password_override,
+        device_id_override=device_id_override,
+        user_agent_override=user_agent_override,
+        android_id_override=android_id_override,
+    )
+    if not result.get("ok"):
+        code = result.get("code", 400)
+        if code == "FIELDS_REQUIRED":
+            return api_response(False, "FIELDS_REQUIRED", result.get("message"), extra={"missing": result.get("missing", [])}, http_status=200)
+        return api_response(False, "RELOGIN_FAILED", result.get("message"), http_status=code if isinstance(code, int) else 400)
+    add_audit_log("token", username, "relogin_basarili")
+    return api_response(True, "RELOGIN_OK", result.get("message"))
+
+
+@admin_bp.route("/validate_token", methods=["POST"])
+def validate_token_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "MISSING_USERNAME", "Kullanici adi belirtilmedi")
+
+    tokens = load_tokens()
+    for token in tokens:
+        if token.get("username") == username:
+            is_valid = validate_token(token)
+            if not is_valid:
+                if token.get("is_active", False):
+                    from datetime import datetime
+
+                    token["is_active"] = False
+                    token["logout_reason"] = "Bu hesabin oturumu Instagram'dan cikis yapildi"
+                    token["logout_time"] = str(datetime.now())
+                    save_tokens(tokens)
+            else:
+                if not token.get("is_active", False):
+                    token["is_active"] = True
+                    if "logout_reason" in token:
+                        del token["logout_reason"]
+                    if "logout_time" in token:
+                        del token["logout_time"]
+                    save_tokens(tokens)
+            return api_response(
+                True,
+                "VALIDATED",
+                "Token dogrulandi",
+                extra={"is_valid": is_valid, "is_active": token.get("is_active", False)},
+            )
+
+    return api_response(False, "NOT_FOUND", "Token bulunamadi", http_status=404)
+
+
+@admin_bp.route("/get_exemptions", methods=["GET"])
+def get_exemptions():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    search = request.args.get("search", "").strip() or None
+    page = request.args.get("page", type=int)
+    page_size = request.args.get("page_size", type=int)
+    grouped, total_groups, total_users = load_exemptions_grouped(
+        search=search, page=page, page_size=page_size
+    )
+    return api_response(
+        True,
+        "OK",
+        "Basarili",
+        extra={
+            "groups": grouped,
+            "total": total_users,
+            "total_groups": total_groups,
+            "page": page or 1,
+            "page_size": page_size or 0,
+        },
+    )
+
+
+@admin_bp.route("/add_exemption", methods=["POST"])
+def add_exemption_admin():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    post_link = _normalize_post_link(data.get("post_link"))
+    username = str(data.get("username", "")).strip().lstrip("@")
+
+    if not post_link or not username:
+        return api_response(False, "MISSING_FIELDS", "post_link ve username zorunlu")
+
+    if not is_valid_post_link(post_link):
+        return api_response(False, "INVALID_LINK", "Gecersiz paylasim linki")
+
+    exemptions = load_exemptions()
+    current_users = set(exemptions.get(post_link, []))
+    already_exists = username in current_users
+    current_users.add(username)
+    exemptions[post_link] = sorted(current_users)
+    save_exemptions(exemptions)
+
+    message = f"@{username} zaten izinli" if already_exists else f"@{username} izinli listesine eklendi"
+    return api_response(True, "OK", message)
+
+
+@admin_bp.route("/delete_exemption", methods=["POST"])
+def delete_exemption_admin():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    post_link = _normalize_post_link(data.get("post_link"))
+    username = str(data.get("username", "")).strip().lstrip("@")
+
+    if not post_link or not username:
+        return api_response(False, "MISSING_FIELDS", "post_link ve username zorunlu")
+
+    exemptions = load_exemptions()
+    users = exemptions.get(post_link, [])
+    updated_users = [user for user in users if user != username]
+
+    if len(updated_users) == len(users):
+        return api_response(False, "NOT_FOUND", "Kayit bulunamadi", http_status=404)
+
+    if updated_users:
+        exemptions[post_link] = updated_users
+    else:
+        exemptions.pop(post_link, None)
+
+    save_exemptions(exemptions)
+    return api_response(True, "DELETED", f"@{username} izinli listesinden kaldirildi")
+
+
+@admin_bp.route("/delete_exemptions_by_link", methods=["POST"])
+def delete_exemptions_by_link_admin():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    post_link = _normalize_post_link(data.get("post_link"))
+    if not post_link:
+        return api_response(False, "MISSING_LINK", "post_link zorunlu")
+
+    exemptions = load_exemptions()
+    if post_link not in exemptions:
+        return api_response(False, "NOT_FOUND", "Link kaydi bulunamadi", http_status=404)
+
+    removed_count = len(exemptions.get(post_link, []))
+    exemptions.pop(post_link, None)
+    save_exemptions(exemptions)
+    return api_response(True, "DELETED", f"{removed_count} izinli kullanici kaldirildi")
+
+
+@admin_bp.route("/get_global_exemptions", methods=["GET"])
+def get_global_exemptions():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    exemptions = load_global_exemptions()
+    return api_response(True, "OK", "Basarili", extra={"exemptions": exemptions})
+
+
+@admin_bp.route("/add_global_exemption", methods=["POST"])
+def add_global_exemption_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "INVALID", "Kullanici adi gerekli")
+    success = add_global_exemption(username)
+    if success:
+        return api_response(True, "ADDED", f"@{username} muaf listeye eklendi")
+    return api_response(False, "ERROR", "Muaf kullanici eklenemedi")
+
+
+@admin_bp.route("/remove_global_exemption", methods=["POST"])
+def remove_global_exemption_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    data = request.get_json() or {}
+    username = data.get("username", "").strip()
+    if not username:
+        return api_response(False, "INVALID", "Kullanici adi gerekli")
+    success = remove_global_exemption(username)
+    if success:
+        return api_response(True, "REMOVED", f"@{username} muaf listeden kaldirildi")
+    return api_response(False, "ERROR", "Muaf kullanici kaldirilamadi")
+
+
+@admin_bp.route("/get_audit_logs", methods=["GET"])
+def get_audit_logs_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    limit = request.args.get("limit", type=int) or 100
+    limit = min(max(1, limit), 500)
+    logs = get_audit_logs(limit=limit)
+    return api_response(True, "OK", "Basarili", extra={"logs": logs})
+
+
+@admin_bp.route("/get_stats", methods=["GET"])
+def get_stats():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    all_tokens = load_tokens(include_deleted=False)
+    total = len(all_tokens)
+    active = sum(1 for t in all_tokens if t.get("is_active"))
+    deleted_count = count_tokens(include_deleted=True) - total
+    relogin_7d = get_audit_relogin_count(days=7)
+    return api_response(
+        True,
+        "OK",
+        "Basarili",
+        extra={
+            "total_tokens": total,
+            "active_tokens": active,
+            "inactive_tokens": total - active,
+            "deleted_tokens": deleted_count,
+            "relogin_last_7_days": relogin_7d,
+        },
+    )
+
+
+@admin_bp.route("/import_tokens", methods=["POST"])
+def import_tokens_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    if "file" not in request.files:
+        return api_response(False, "NO_FILE", "Dosya bulunamadı")
+    file = request.files["file"]
+    if file.filename == "":
+        return api_response(False, "NO_FILE", "Dosya seçilmedi")
+    if not file.filename.endswith(".json"):
+        return api_response(False, "INVALID_FORMAT", "Sadece JSON dosyaları desteklenir")
+    try:
+        content = file.read().decode("utf-8")
+        data = json.loads(content)
+        new_tokens = data.get("tokens", [])
+        if not new_tokens:
+            return api_response(False, "NO_TOKENS", "JSON içinde geçerli 'tokens' listesi bulunamadı")
+            
+        current_tokens = load_tokens(include_deleted=True)
+        added_count = 0
+        updated_count = 0
+        
+        for new_t in new_tokens:
+            username = new_t.get("username")
+            if not username:
+                continue
+            
+            # İçeri aktarılan tokeni her zaman zorla "Aktif" yap ve varsa çıkış hatalarını temizle
+            new_t["is_active"] = True
+            new_t.pop("logout_reason", None)
+            new_t.pop("logout_time", None)
+            new_t.pop("deleted_at", None)
+                
+            replaced = False
+            for idx, existing_t in enumerate(current_tokens):
+                if existing_t.get("username") == username:
+                    current_tokens[idx] = new_t
+                    replaced = True
+                    updated_count += 1
+                    break
+            if not replaced:
+                current_tokens.append(new_t)
+                added_count += 1
+                
+        save_tokens(current_tokens)
+        return api_response(True, "IMPORTED", f"{added_count} yeni eklendi, {updated_count} güncellendi")
+    except Exception as e:
+        logger.error("Token import hatası: %s", e)
+        return api_response(False, "ERROR", f"İçeri aktarma hatası: {e}", http_status=500)
+
+
+@admin_bp.route("/export_tokens", methods=["GET"])
+def export_tokens_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    from flask import Response
+    import csv
+    import io
+    fmt = request.args.get("format", "json").lower()
+    include_deleted = request.args.get("include_deleted", "").lower() == "true"
+    tokens = load_tokens(include_deleted=include_deleted)
+    
+    if fmt == "csv":
+        if not tokens:
+            output = io.StringIO()
+            w = csv.writer(output)
+            w.writerow(["username", "full_name", "is_active", "added_at"])
+            body = output.getvalue()
+        else:
+            output = io.StringIO()
+            w = csv.DictWriter(output, fieldnames=tokens[0].keys())
+            w.writeheader()
+            w.writerows(tokens)
+            body = output.getvalue()
+        return Response(body, mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=tokens.csv"})
+    body = json.dumps({"tokens": tokens}, ensure_ascii=False, indent=2)
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=tokens.json"})
+
+
+@admin_bp.route("/export_exemptions", methods=["GET"])
+def export_exemptions_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    from flask import Response
+    import csv
+    import io
+    fmt = request.args.get("format", "json").lower()
+    exemptions = load_exemptions()
+    if fmt == "csv":
+        output = io.StringIO()
+        w = csv.writer(output)
+        w.writerow(["post_link", "username"])
+        for post_link, usernames in exemptions.items():
+            for u in usernames:
+                w.writerow([post_link, u])
+        body = output.getvalue()
+        return Response(body, mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=exemptions.csv"})
+    list_export = [{"post_link": k, "usernames": v} for k, v in exemptions.items()]
+    body = json.dumps({"exemptions": list_export}, ensure_ascii=False, indent=2)
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": "attachment; filename=exemptions.json"})
+
+
+@admin_bp.route("/get_groups", methods=["GET"])
+def get_groups_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+        
+    token_record = get_working_active_token()
+    if not token_record:
+        return api_response(False, "ERROR", "Aktif token bulunamadi.")
+        
+    res = fetch_group_threads(token_record)
+    if not res.get("ok"):
+        return api_response(False, "ERROR", "Gruplar cekilemedi.")
+        
+    return api_response(True, "OK", "Gruplar cekildi.", extra={"groups": res.get("groups", [])})
+
+
+@admin_bp.route("/get_automations", methods=["GET"])
+def get_automations_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+        
+    automations = load_automations()
+    return api_response(True, "OK", "Otomasyonlar", extra={"automations": automations})
+
+
+@admin_bp.route("/save_automation", methods=["POST"])
+def save_automation_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+        
+    data = request.get_json() or {}
+    thread_id = data.get("thread_id")
+    time_str = data.get("time")
+    is_active = data.get("is_active", False)
+    group_name = data.get("group_name", "Bilinmeyen Grup")
+    notify_username = data.get("notify_username", "seghob").strip().lstrip("@")
+    
+    if not thread_id or not time_str:
+        return api_response(False, "ERROR", "Thread ID ve zaman zorunlu.")
+        
+    automations = load_automations()
+    automations[str(thread_id)] = {
+        "time": time_str,
+        "is_active": is_active,
+        "group_name": group_name,
+        "notify_username": notify_username,
+    }
+    save_automations(automations)
+    return api_response(True, "OK", "Otomasyon ayarlari kaydedildi.")
+
+
+@admin_bp.route("/trigger_automation", methods=["POST"])
+def trigger_automation_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return api_response(False, "ERROR", "Thread ID zorunlu.")
+
+    import threading
+    from app_core.automation import run_automation_for_thread
+    t = threading.Thread(target=run_automation_for_thread, args=(str(thread_id),), daemon=True)
+    t.start()
+    return api_response(True, "OK", f"Otomasyon tetiklendi (arka planda calisuyor): {thread_id}")
+@admin_bp.route("/unsend_messages", methods=["POST"])
+def unsend_messages_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return api_response(False, "ERROR", "Thread ID zorunlu.")
+
+    token_record = get_working_active_token()
+    if not token_record:
+        return api_response(False, "ERROR", "Aktif token bulunamadi.")
+
+    # Bot'un kendi mesajlarını çek
+    items_res = fetch_own_thread_items(token_record, thread_id, limit=30)
+    if not items_res.get("ok"):
+        return api_response(False, "ERROR", f"Mesajlar cekilemedi: {items_res.get('error')}")
+
+    items = items_res.get("items", [])
+    if not items:
+        return api_response(True, "OK", "Geri alinacak mesaj bulunamadi.", extra={"deleted": 0})
+
+    import time
+    deleted = 0
+    failed = 0
+    for item in items:
+        item_id = item.get("item_id")
+        if not item_id:
+            continue
+        res = delete_thread_item(token_record, thread_id, item_id)
+        if res.get("ok"):
+            deleted += 1
+        else:
+            failed += 1
+        time.sleep(0.8)  # rate limit
+
+    return api_response(
+        True, "OK",
+        f"{deleted} mesaj geri alindi, {failed} basarisiz.",
+        extra={"deleted": deleted, "failed": failed}
+    )

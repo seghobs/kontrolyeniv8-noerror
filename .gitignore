@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+app.db
+logs/
+automations.json
+.vscode/
+.idea/
+*.log
+data/*
+!data/.gitkeep

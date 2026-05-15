@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- Cache Devre Disi: Chrome, Safari, Firefox hicbir sayfayi hatirlamamali -->
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Eksikler</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/result.css') }}?v={{ range(1, 99999) | random }}">
+</head>
+<body data-rate-limited='{{ "true" if rate_limited else "false" }}'>
+    {% if rate_limited %}
+    <div class="alert alert-premium-warning text-center mx-3 mt-3 shadow-lg">
+        <i class="fas fa-clock me-2"></i>Çok fazla istek; Instagram geçici sınır koydu. Lütfen 10–15 dakika bekleyip tekrar deneyin.
+    </div>
+    {% endif %}
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-12 col-md-10 col-lg-8 col-xl-7">
+                <div class="result-card">
+                    <div class="text-center mb-4">
+                        <h1 class="mb-3">
+                            <i class="fas fa-user-minus me-2"></i>{% if check_likes %}Beğeni Durumu Özeti{% else %}Yorum Durumu Özeti{% endif %}
+                        </h1>
+                    </div>
+
+                    <div id="sortable-cards-container">
+                    {% if all_commented and all_commented|length > 0 %}
+                    <div class="mb-4 sortable-main-card">
+                        <div class="completed-section-header shadow-sm" onclick="toggleCompletedSection()">
+                            <div class="d-flex justify-content-between align-items-center w-100">
+                                <i class="fas fa-grip-vertical me-3 drag-handle" title="Tut ve Sürükle" onclick="event.stopPropagation()"></i>
+                                <div class="header-text-container">
+                                    <div class="d-flex align-items-center flex-wrap gap-2">
+                                        <strong class="header-title-main">
+                                            <i class="fas fa-user-check me-1" style="color: var(--success-color);"></i>Tamamlayan Kullanıcılar
+                                        </strong>
+                                        <span class="badge badge-success-outline">
+                                            {{ all_commented|length }} kişi
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-end align-items-center flex-shrink-0 ps-1">
+                                    <i id="completedSectionIcon" class="fas fa-chevron-down chevron-icon"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="completedSection" style="display: none; margin-top: 15px;">
+                            <div class="search-container mb-3">
+                                <i class="fas fa-search search-icon"></i>
+                                <input type="text" id="completedSearchInput" placeholder="Kullanıcı adı ara..." 
+                                       class="search-input" onkeyup="filterCompletedList()">
+                            </div>
+                            <button class="btn btn-primary mb-3" onclick="window.copyCompletedList()">
+                                <i class="fas fa-copy me-2"></i>Tamamlamış Listeyi Kopyala
+                            </button>
+                            <ul class="list-group list-group-flush" id="completedList">
+                                {% for user in all_commented %}
+                                <li class="list-group-item" data-username="{{ user }}">
+                                    <div class="d-flex align-items-center justify-content-between w-100">
+                                        <span class="username-text">
+                                            <i class="fas fa-user-check me-2"></i><strong>{{ user }}</strong>
+                                        </span>
+                                        {% if duplicate_comment_users and user in duplicate_comment_users %}
+                                        <span class="badge badge-warning-outline" title="Bu kullanıcı birden fazla postta aynı yorumu kullanmış!">
+                                            <i class="fas fa-clone me-1"></i>Kopya Yorum
+                                        </span>
+                                        {% endif %}
+                                    </div>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% for item in links %}
+                    <div class="mb-4 link-card shadow-sm sortable-main-card">
+                        <div class="eksikler-section-header" onclick="toggleEksiklerSection({{ loop.index }})">
+                            <div class="d-flex justify-content-between align-items-center w-100">
+                                <i class="fas fa-grip-vertical me-3 drag-handle" title="Tut ve Sürükle" onclick="event.stopPropagation()"></i>
+                                <div class="header-text-container">
+                                        <div class="d-flex align-items-center flex-wrap gap-2">
+                                            <strong class="header-title-main">
+                                                <i class="fas fa-user-minus me-1" style="color: var(--danger-color);"></i>{% if check_likes %}Beğenmeyenler{% else %}Eksikler (Yorum Atmayanlar){% endif %}
+                                            </strong>
+                                            <span id="elemanSayisi-{{ loop.index }}" class="badge badge-danger-outline"></span>
+                                        </div>
+                                        
+                                        <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+                                            {% if item.sender %}
+                                            <span class="badge badge-indigo-outline">
+                                                <span class="d-none d-sm-inline" style="color: var(--muted-foreground); font-weight: 400; margin-right: 4px;">Gönderi Sahibi:</span><i class="fas fa-user-circle d-inline d-sm-none me-1"></i>@{{ item.sender }}
+                                            </span>
+                                            {% endif %}
+                                            
+                                            <a href="{{ item.post_link }}" target="_blank" onclick="event.stopPropagation();" class="btn btn-sm btn-link-action" title="Linke Git">
+                                                <i class="fas fa-external-link-alt"></i><span class="d-none d-sm-inline ms-1">Link</span>
+                                            </a>
+                                            
+                                            <button type="button" class="btn btn-sm btn-copy-action" onclick="event.stopPropagation(); window.copyLink('{{ item.post_link }}')" title="Linki kopyala">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-end align-items-center flex-shrink-0 ps-1">
+                                        <i id="eksiklerIcon-{{ loop.index }}" class="fas fa-chevron-down chevron-icon"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="eksiklerSection-{{ loop.index }}" style="display: none; margin-top: 15px;">
+                                <div class="search-container mb-3">
+                                    <i class="fas fa-search search-icon"></i>
+                                    <input type="text" placeholder="Bu link icin kullanıcı ara..." 
+                                           class="search-input" onkeyup="filterEksiklerList({{ loop.index }})">
+                                </div>
+
+                                <button class="btn btn-primary mb-3" onclick="window.copyEksiklerList(`{{ loop.index }}`)">
+                                    <i class="fas fa-copy me-2"></i>Bu Link icin Eksikleri Kopyala
+                                </button>
+
+                                <ul class="list-group list-group-flush eksikler-list"
+                                    id="eksiklerListesi-{{ loop.index }}"
+                                    data-post-link="{{ item.post_link }}">
+                                    {% for eksik in item.eksikler %}
+                                    <li class="list-group-item" data-username="{{ eksik }}">
+                                        <span class="username-text">
+                                            <i class="fas fa-user me-2"></i><strong>{{ eksik }}</strong>
+                                        </span>
+                                        <button class="btn btn-exemption" onclick="window.addExemption('{{ eksik }}', '{{ item.post_link }}', this)">
+                                            <i class="fas fa-check me-1"></i>İzinli Say
+                                        </button>
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    
+                    {% if user_missing_posts %}
+                    <div class="mb-4 shadow-sm sortable-main-card detayli-rapor-card">
+                        <div class="p-4" style="cursor: pointer;" onclick="const content = document.getElementById('detayliRaporContent'); const icon = document.getElementById('detayliRaporIcon'); if(content.style.display === 'none'){ content.style.display = 'block'; icon.style.transform = 'rotate(180deg)'; } else { content.style.display = 'none'; icon.style.transform = 'rotate(0deg)'; }">
+                            <div class="d-flex justify-content-between align-items-center w-100">
+                                <i class="fas fa-grip-vertical me-3 drag-handle" title="Tut ve Sürükle" onclick="event.stopPropagation()"></i>
+                                <div class="header-text-container">
+                                    <div class="d-flex align-items-center flex-wrap gap-2">
+                                        <strong style="color: var(--foreground); font-size: 18px; letter-spacing: 0.3px; line-height: 1.4; word-break: break-word;">
+                                            <i class="fas fa-user-times me-2" style="color: var(--danger-color);"></i>Eksik Kullanıcı Detaylı Rapor
+                                        </strong>
+                                        <span class="badge badge-danger-outline">
+                                            {{ user_missing_posts|length }} eksik kullanıcı
+                                        </span>
+                                    </div>
+                                    <div style="color: var(--text-secondary); font-size: 13px;">
+                                        Aşağıda her eksik kullanıcının hangi postlarda eksik olduğu gösterilmektedir.
+                                    </div>
+                                </div>
+                                <div class="d-flex justify-content-end align-items-center flex-shrink-0 ps-1">
+                                    <i id="detayliRaporIcon" class="fas fa-chevron-down chevron-icon"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="detayliRaporContent" class="p-4 pt-1" style="display: none;">
+                        {% for username, posts in user_missing_posts.items() %}
+                        <div class="user-detail-card">
+                            <div class="p-4" style="cursor: pointer;" onclick="const content = document.getElementById('missing-posts-{{ username }}'); const icon = document.getElementById('user-icon-{{ loop.index }}'); if(content.style.display === 'none'){ content.style.display = 'flex'; icon.style.transform = 'rotate(180deg)'; } else { content.style.display = 'none'; icon.style.transform = 'rotate(0deg)'; }">
+                                <div class="d-flex justify-content-between align-items-center w-100 pb-3 user-detail-header">
+                                    <div class="header-text-container">
+                                        <div class="d-flex align-items-center flex-wrap gap-2">
+                                            <strong class="header-title-main">
+                                                <i class="fas fa-user-astronaut me-1" style="color: var(--warning-color);"></i>@{{ username }}
+                                            </strong>
+                                            <span class="badge badge-danger-outline">
+                                                <i class="fas fa-exclamation-circle me-1"></i>{{ posts|length }} eksik işlem
+                                            </span>
+                                        </div>
+                                        
+                                        <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+                                            <button type="button" class="btn btn-sm btn-copy-action" onclick="event.stopPropagation(); window.copyUserMissingPosts('{{ username }}')" title="Tüm Linkleri Kopyala">
+                                                <i class="fas fa-copy"></i><span class="d-none d-sm-inline ms-1" style="padding-left: 2px;">Tüm Linkleri Kopyala</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-end align-items-center flex-shrink-0 ps-1">
+                                        <i id="user-icon-{{ loop.index }}" class="fas fa-chevron-down chevron-icon"></i>
+                                    </div>
+                                </div>
+                                
+                                <div id="missing-posts-{{ username }}" class="row g-2 mt-3" style="display: none;">
+                                    {% for post in posts %}
+                                    <div class="col-12">
+                                        <div class="post-link-item">
+                                            <div class="d-flex align-items-center gap-2 overflow-hidden">
+                                                <div class="instagram-icon-box">
+                                                    <i class="fab fa-instagram" style="color: var(--accent-mocha); font-size: 14px;"></i>
+                                                </div>
+                                                <a href="{{ post }}" target="_blank" onclick="event.stopPropagation();" class="post-link-anchor">
+                                                    {{ post }}
+                                                </a>
+                                            </div>
+                                            <button class="btn btn-sm" style="background: transparent; border: none; color: var(--muted-foreground); padding: 4px; flex-shrink: 0;" onclick="event.stopPropagation(); window.copyToClipboard('{{ post }}')" title="Kopyala" onmouseover="this.style.color='var(--accent-caramel)'" onmouseout="this.style.color='var(--muted-foreground)'">
+                                                <i class="fas fa-copy" style="font-size: 15px;"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bildirim -->
+    <div id="notification" class="notification">
+        <i class="fas fa-check-circle"></i>
+        <span id="notification-message"></span>
+    </div>
+
+    <!-- Onay Modalı -->
+    <div id="confirmModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <i class="fas fa-exclamation-circle"></i>
+                Onay Gerekli
+            </div>
+            <div class="modal-body">
+                <span class="modal-username" id="modalUsername"></span> kullanıcısını izinli sayacaksınız. Emin misiniz?
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" onclick="closeModal()">
+                    <i class="fas fa-times me-1"></i>Hayır
+                </button>
+                <button class="modal-btn modal-btn-confirm" onclick="confirmExemption()">
+                    <i class="fas fa-check me-1"></i>Evet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var el = document.getElementById('sortable-cards-container');
+            if (el) {
+                new Sortable(el, {
+                    animation: 250,
+                    handle: '.drag-handle',
+                    easing: "cubic-bezier(0.25, 1, 0.5, 1)",
+                    ghostClass: 'sortable-ghost',
+                    dragClass: 'sortable-drag'
+                });
+            }
+        });
+    </script>
+
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="mobile-bottom-nav">
+        <a href="/" class="nav-item">
+            <i class="fas fa-home"></i>
+            <span>Anasayfa</span>
+        </a>
+        <a href="/token_al" class="nav-item">
+            <i class="fas fa-key"></i>
+            <span>Token Al</span>
+        </a>
+        <a href="/admin" class="nav-item">
+            <i class="fas fa-user-shield"></i>
+            <span>Admin Panel</span>
+        </a>
+    </nav>
+
+    <script src="{{ url_for('static', filename='js/result.js') }}?v={{ range(1, 99999) | random }}"></script>
+    
+    <!-- Page Transition Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    if (this.target === '_blank' || !this.href || this.href.startsWith('javascript:') || this.getAttribute('href').startsWith('#') || this.hasAttribute('download') || this.onclick) return;
+                    if (this.hostname === window.location.hostname) {
+                        e.preventDefault();
+                        const targetUrl = this.href;
+                        document.body.classList.add('page-transitioning-out');
+                        setTimeout(() => {
+                            window.location.href = targetUrl;
+                        }, 350);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+
+
+</html>
