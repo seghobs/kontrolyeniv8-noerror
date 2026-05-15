@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kontrol Project Auto Setup - Tek Komutla Kurulum
-# Kullanim: bash -c "$(curl -sL https://raw.githubusercontent.com/seghobs/kontrolyeni-v6vip/main/setup.sh)"
+# Kullanim: bash -c "$(curl -sL https://raw.githubusercontent.com/seghobs/kontrolyeniv8-noerror/main/setup.sh)"
 
 echo "========================================="
 echo "Kontrol Projesi Otomatik Kuruluyor..."
@@ -16,7 +16,7 @@ fi
 # Projeyi GitHub'dan indir
 echo "Proje indiriliyor..."
 rm -rf mysite 2>/dev/null
-git clone https://github.com/seghobs/kontrolyeni-v6vip.git mysite
+git clone https://github.com/seghobs/kontrolyeniv8-noerror.git mysite
 
 if [ ! -d "mysite" ]; then
     echo "HATA: Proje indirilemedi!"

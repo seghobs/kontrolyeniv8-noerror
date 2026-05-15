@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO_URL="${1:-https://github.com/seghobs/kontrolyeni-v6vip.git}"
+REPO_URL="${1:-https://github.com/seghobs/kontrolyeniv8-noerror.git}"
 TARGET_DIR="${2:-.}"
 
 if [ "$TARGET_DIR" = "." ]; then
