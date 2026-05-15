@@ -473,3 +473,69 @@ def get_audit_relogin_count(days=7):
         return row["c"] if row else 0
     finally:
         conn.close()
+
+
+def get_global_automation_status():
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT value FROM key_value WHERE key='global_automation_status'").fetchone()
+        if not row:
+            return False
+        return row["value"] == "1"
+    finally:
+        conn.close()
+
+
+def set_global_automation_status(status):
+    conn = _connect()
+    try:
+        val = "1" if status else "0"
+        conn.execute(
+            "INSERT OR REPLACE INTO key_value (key, value) VALUES ('global_automation_status', ?)",
+            (val,),
+        )
+        conn.commit()
+        return True
+    except Exception as error:
+        logger.error("Global automation status yazma hatasi: %s", error)
+        return False
+    finally:
+        conn.close()
+
+
+def get_global_automation_settings():
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT value FROM key_value WHERE key='global_automation_settings'").fetchone()
+        if row:
+            import json
+            return json.loads(row["value"])
+        return {
+            "times": "23:59",
+            "send_to_group": True,
+            "template": "@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız.",
+            "send_dm_to_missing": True,
+            "dm_template": "Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..",
+            "admin_notify_template": "✅ Otomasyon tamamlandı!\n\n📌 Grup: {grup_ismi}\n🔗 Post: {post_url}\n📅 Paylaşım Tarihi: {post_tarihi}\n\n👥 Toplam üye: {toplam_uye}\n❌ Eksik: {eksik_sayisi}\n⏰ Saat: {saat}"
+        }
+    finally:
+        conn.close()
+
+
+def set_global_automation_settings(data):
+    conn = _connect()
+    try:
+        import json
+        val = json.dumps(data)
+        conn.execute(
+            "INSERT OR REPLACE INTO key_value (key, value) VALUES ('global_automation_settings', ?)",
+            (val,),
+        )
+        conn.commit()
+        return True
+    except Exception as error:
+        logger.error("Global automation settings yazma hatasi: %s", error)
+        return False
+    finally:
+        conn.close()
+

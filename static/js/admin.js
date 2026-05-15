@@ -927,8 +927,151 @@ document.getElementById("addExemptionForm").addEventListener("submit", async (ev
 });
 
 // ============================================
+// ============================================
 // AUTOMATION MANAGEMENT (BETA)
 // ============================================
+
+async function fetchGlobalAutomationStatus() {
+    const btn = document.getElementById("globalAutomationToggleBtn");
+    if (!btn) return;
+    try {
+        const res = await fetch("/admin/get_global_automation_status");
+        const data = await res.json();
+        if (data.success) {
+            updateGlobalAutomationBtn(data.is_active);
+        }
+    } catch (e) {
+        console.error("Global otomasyon durumu alinamadi", e);
+    }
+}
+
+function updateGlobalAutomationBtn(isActive) {
+    const btn = document.getElementById("globalAutomationToggleBtn");
+    if (!btn) return;
+    const span = btn.querySelector("span");
+    const icon = btn.querySelector("i");
+    if (isActive) {
+        btn.className = "btn btn-success";
+        span.textContent = "Global Otomasyon: AKTİF";
+        icon.className = "fas fa-toggle-on";
+    } else {
+        btn.className = "btn btn-danger";
+        span.textContent = "Global Otomasyon: PASİF";
+        icon.className = "fas fa-toggle-off";
+    }
+}
+
+async function toggleGlobalAutomation() {
+    const btn = document.getElementById("globalAutomationToggleBtn");
+    if(!btn) return;
+    btn.disabled = true;
+    try {
+        const res = await postJson("/admin/toggle_global_automation", {});
+        if (res.success) {
+            updateGlobalAutomationBtn(res.is_active);
+            showAlert(res.message, "success");
+        } else {
+            showAlert(res.message, "error");
+        }
+    } catch (e) {
+        showAlert("Hata: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+    }
+}
+window.toggleGlobalAutomation = toggleGlobalAutomation;
+
+async function fetchGlobalAutomationSettings() {
+    try {
+        const res = await fetch("/admin/get_global_automation_settings");
+        const data = await res.json();
+        if (data.success && data.settings) {
+            const s = data.settings;
+            const timeEl = document.getElementById("global_auto_times");
+            if(timeEl) timeEl.value = s.times || "23:59";
+            
+            const sendEl = document.getElementById("global_send_group");
+            if(sendEl) sendEl.checked = s.send_to_group !== false;
+            
+            const tempEl = document.getElementById("global_auto_template");
+            if(tempEl) tempEl.value = s.template || "@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız.";
+            
+            const dmToggleEl = document.getElementById("global_send_dm_to_missing");
+            if(dmToggleEl) dmToggleEl.checked = s.send_dm_to_missing !== false;
+            
+            const dmTempEl = document.getElementById("global_dm_template");
+            if(dmTempEl) dmTempEl.value = s.dm_template || "Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..";
+            
+            const adminNotifyEl = document.getElementById("global_admin_notify_template");
+            if(adminNotifyEl) adminNotifyEl.value = s.admin_notify_template || "✅ Otomasyon tamamlandı!\n\n📌 Grup: {grup_ismi}\n🔗 Post: {post_url}\n📅 Paylaşım Tarihi: {post_tarihi}\n\n👥 Toplam üye: {toplam_uye}\n❌ Eksik: {eksik_sayisi}\n⏰ Saat: {saat}";
+        }
+    } catch (e) {
+        console.error("Global otomasyon ayarlari alinamadi", e);
+    }
+}
+
+async function saveGlobalAutomationSettings() {
+    const timeEl = document.getElementById("global_auto_times");
+    const sendEl = document.getElementById("global_send_group");
+    const tempEl = document.getElementById("global_auto_template");
+    const dmToggleEl = document.getElementById("global_send_dm_to_missing");
+    const dmTempEl = document.getElementById("global_dm_template");
+    const adminNotifyEl = document.getElementById("global_admin_notify_template");
+    
+    if(!timeEl || !sendEl || !tempEl) return;
+    
+    try {
+        const res = await fetch('/admin/save_global_automation_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                times: timeEl.value,
+                send_to_group: sendEl.checked,
+                template: tempEl.value,
+                send_dm_to_missing: dmToggleEl ? dmToggleEl.checked : true,
+                dm_template: dmTempEl ? dmTempEl.value : "Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..",
+                admin_notify_template: adminNotifyEl ? adminNotifyEl.value : ""
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showAlert('Ayarlar başarıyla kaydedildi!', 'success');
+        } else {
+            showAlert(data.message || 'Hata oluştu.', 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showAlert('Bir hata oluştu.', 'error');
+    }
+}
+
+async function testAdminNotification(threadId, groupName) {
+    if (!confirm(`${groupName} grubu için kendinize test bildirimi göndermek istiyor musunuz? (Kaydedilmiş bildirim şablonunuzu kullanır)`)) return;
+    
+    const notifyUsername = (document.getElementById(`auto_notify_${threadId}`) || {}).value || 'seghob';
+    
+    try {
+        const res = await fetch('/admin/test_admin_notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                thread_id: threadId,
+                group_name: groupName,
+                notify_username: notifyUsername.trim().replace(/^@/, '')
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showAlert('Test bildirimi başarıyla gönderildi!', 'success');
+        } else {
+            showAlert(data.message || 'Hata oluştu.', 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showAlert('Bir hata oluştu.', 'error');
+    }
+}
+window.saveGlobalAutomationSettings = saveGlobalAutomationSettings;
 
 function toggleAutomationPanel() {
     const body = document.getElementById('automationBody');
@@ -936,6 +1079,10 @@ function toggleAutomationPanel() {
     if (!body || !chevron) return;
     body.classList.toggle('collapsed');
     chevron.classList.toggle('rotated');
+    if (!body.classList.contains('collapsed')) {
+        fetchGlobalAutomationStatus();
+        fetchGlobalAutomationSettings();
+    }
 }
 
 async function loadAutomationGroups() {
@@ -968,34 +1115,39 @@ async function loadAutomationGroups() {
                     const groupName = g.name || 'İsimsiz Grup';
                     const saved = savedAutos[threadId] || {};
                     const isChecked = saved.is_active ? 'checked' : '';
-                    const timeValue = saved.time || '23:59';
                     
                     const card = document.createElement('div');
                     card.className = 'exemption-card';
                     card.innerHTML = `
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                             <strong style="color:#f0f0f0; font-size:15px;"><i class="fas fa-users me-2" style="color:#a78bfa;"></i> ${escapeHtml(groupName)}</strong>
-                            <div class="toggle-switch" style="transform: scale(0.85);">
+                            <label class="toggle-switch" style="transform: scale(0.85); display: inline-block;">
                                 <input type="checkbox" id="auto_toggle_${threadId}" ${isChecked}>
-                                <span class="slider" style="background:var(--accent-primary);"></span>
-                            </div>
+                                <span class="slider"></span>
+                            </label>
                         </div>
                         <div style="font-size:12px; color:#a0aec0; margin-bottom:12px; word-break:break-all;">Üye: ${g.member_count || '?'} kişi</div>
-                        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-                            <label style="color:rgba(255,255,255,0.6); font-size:13px;"><i class="fas fa-clock me-1"></i> GMT+3 Saat:</label>
-                            <input type="time" id="auto_time_${threadId}" value="${timeValue}" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:6px 12px; border-radius:8px;">
+                        <div style="margin-bottom:12px;">
+                            <label style="color:rgba(255,255,255,0.6); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-filter me-1"></i> Kontrol Yöntemi:</label>
+                            <select id="auto_method_${threadId}" style="background:rgba(0,0,0,0.2); border:1px solid rgba(196,149,106,0.3); color:#fff; padding:6px 12px; border-radius:8px; width:100%; font-size:13px; outline:none;">
+                                <option value="all_members" style="background:#16110d; color:#fff;" ${saved.control_method === 'all_members' || !saved.control_method ? 'selected' : ''}>Tüm Üyeler Arası Kontrol</option>
+                                <option value="post_senders" style="background:#16110d; color:#fff;" ${saved.control_method === 'post_senders' ? 'selected' : ''}>Sadece Paylaşım Yapanlar Arası Kontrol</option>
+                            </select>
                         </div>
                         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                            <label style="color:rgba(255,255,255,0.6); font-size:13px;"><i class="fas fa-bell me-1"></i> Bildirim Hesabı:</label>
-                            <input type="text" id="auto_notify_${threadId}" value="${saved.notify_username || 'seghob'}" placeholder="Instagram kullanıcı adı" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:6px 12px; border-radius:8px; width:150px;">
+                            <label style="color:rgba(255,255,255,0.6); font-size:13px;"><i class="fas fa-bell me-1"></i> Bildirim:</label>
+                            <input type="text" id="auto_notify_${threadId}" value="${saved.notify_username || 'seghob'}" placeholder="Kullanıcı adı" style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:6px 12px; border-radius:8px; width:120px;">
                             <button type="button" class="btn btn-sm btn-success" onclick="saveAutomation('${threadId}', '${escapeHtml(groupName)}')">
                                 <i class="fas fa-save me-1"></i> Kaydet
                             </button>
                             <button type="button" class="btn btn-sm" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#f87171;" onclick="triggerAutomation('${threadId}', '${escapeHtml(groupName)}')">
-                                <i class="fas fa-bolt me-1"></i> Manuel Tetikle
+                                <i class="fas fa-bolt me-1"></i> Tetikle
                             </button>
                             <button type="button" class="btn btn-sm" style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);color:#fbbf24;" onclick="unsendMessages('${threadId}', '${escapeHtml(groupName)}')">
-                                <i class="fas fa-undo me-1"></i> Mesajları Geri Al
+                                <i class="fas fa-undo me-1"></i> Geri Al
+                            </button>
+                            <button type="button" class="btn btn-sm" style="background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;" onclick="testAdminNotification('${threadId}', '${escapeHtml(groupName)}')">
+                                <i class="fas fa-paper-plane me-1"></i> Test Gönder
                             </button>
                         </div>
                     `;
@@ -1017,9 +1169,9 @@ async function loadAutomationGroups() {
 }
 
 async function saveAutomation(threadId, groupName) {
-    const timeInput = document.getElementById(`auto_time_${threadId}`).value;
     const isActive = document.getElementById(`auto_toggle_${threadId}`).checked;
     const notifyUsername = (document.getElementById(`auto_notify_${threadId}`) || {}).value || 'seghob';
+    const controlMethod = (document.getElementById(`auto_method_${threadId}`) || {}).value || 'all_members';
     
     try {
         const res = await fetch('/admin/save_automation', {
@@ -1027,21 +1179,41 @@ async function saveAutomation(threadId, groupName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 thread_id: threadId,
-                time: timeInput,
                 is_active: isActive,
                 group_name: groupName,
-                notify_username: notifyUsername.trim().replace(/^@/, '')
+                notify_username: notifyUsername.trim().replace(/^@/, ''),
+                control_method: controlMethod
             })
         });
         const data = await res.json();
         if (data.success) {
-            showAlert(`[${groupName}] otomasyonu ${isActive ? 'aktif ('+timeInput+')' : 'pasif'} olarak kaydedildi!`, 'success');
+            showAlert(`[${groupName}] otomasyonu ${isActive ? 'aktif' : 'pasif'} olarak kaydedildi!`, 'success');
         } else {
             showAlert(data.message || 'Kaydedilemedi.', 'error');
         }
     } catch (e) {
         console.error(e);
         showAlert('Hata olustu.', 'error');
+    }
+}
+
+async function liveTestAutomation() {
+    if (!confirm(`Sistemde aktif olan tüm gruplar için ŞU AN Canlı Test (Sadece bildirim, mesaj atılmaz) başlatılacaktır. Emin misiniz?`)) return;
+    try {
+        const res = await fetch('/admin/live_test_automation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.success) {
+            showAlert(data.message, 'success');
+        } else {
+            showAlert(data.message || 'Hata oluştu.', 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showAlert('Bir hata oluştu.', 'error');
     }
 }
 

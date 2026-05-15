@@ -523,7 +523,7 @@ textarea.form-control {
 }
 .toggle-switch {
     position: relative;
-    width: 42px;
+    width: 44px;
     height: 24px;
     flex-shrink: 0;
 }
@@ -536,10 +536,11 @@ textarea.form-control {
     position: absolute;
     cursor: pointer;
     top: 0; left: 0; right: 0; bottom: 0;
-    background-color: rgba(196, 149, 106, 0.15);
-    transition: .4s;
+    background-color: rgba(0, 0, 0, 0.4);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 24px;
-    border: 1px solid rgba(196, 149, 106, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
 }
 .toggle-switch .slider:before {
     position: absolute;
@@ -548,18 +549,32 @@ textarea.form-control {
     width: 18px;
     left: 2px;
     bottom: 2px;
-    background-color: var(--accent-cream);
-    transition: .3s ease;
+    background-color: #a0aec0;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     border-radius: 50%;
     box-shadow: 0 2px 4px rgba(0,0,0,0.3);
 }
 .toggle-switch input:checked + .slider {
-    background: var(--accent-caramel);
+    background: var(--accent-caramel, #c4956a);
     border-color: rgba(196, 149, 106, 0.5);
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1), 0 0 10px rgba(196, 149, 106, 0.4);
+    animation: pulse-glow-toggle 2s infinite;
 }
 .toggle-switch input:checked + .slider:before {
-    transform: translateX(18px);
+    transform: translateX(20px);
     background-color: #fff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3), 0 0 8px rgba(255,255,255,0.8);
+}
+@keyframes pulse-glow-toggle {
+    0% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.1), 0 0 8px rgba(196, 149, 106, 0.3); }
+    50% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.1), 0 0 16px rgba(196, 149, 106, 0.6); }
+    100% { box-shadow: inset 0 2px 4px rgba(0,0,0,0.1), 0 0 8px rgba(196, 149, 106, 0.3); }
+}
+.toggle-switch input:active + .slider:before {
+    width: 24px;
+}
+.toggle-switch input:checked:active + .slider:before {
+    transform: translateX(14px);
 }
 
 /* Kahve konseptli switch için override */

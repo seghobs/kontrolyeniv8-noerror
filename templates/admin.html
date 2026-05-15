@@ -149,7 +149,72 @@
                 <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 14px;">
                     <i class="fas fa-info-circle"></i> Bu özellik, grupları belirlediğiniz "GMT+3" saatinde otomatik tarar, dünün/bugünün gönderilerine eksikleri çıkarır ve doğrudan <b>gruba yazar</b>. Bu riskli bir işlemdir (SPAM filtresi tetiklenebilir). Lütfen dikkatli kullanın!
                 </p>
-                <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
+                    <h4 style="color: var(--accent-primary); margin-bottom: 15px; font-size: 15px;"><i class="fas fa-cog me-2"></i> Global Otomasyon Ayarları</h4>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-clock me-1"></i> Çalışma Saatleri (Örn: 10:00, 15:00, 20:00)</label>
+                        <input type="text" id="global_auto_times" placeholder="10:00, 15:00" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; max-width: 400px;">
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px;"><i class="fas fa-paper-plane me-1"></i> Eksik Listesini Gruba At:</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="global_send_group" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-comment-alt me-1"></i> Gruba Atılacak Uyarı Mesaj Şablonu:</label>
+                        <textarea id="global_auto_template" rows="3" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız.</textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px;"><i class="fas fa-envelope me-1"></i> Eksiklere Tek Tek DM At:</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="global_send_dm_to_missing" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-comment-dots me-1"></i> Eksiklere Atılacak DM Şablonu:</label>
+                        <textarea id="global_dm_template" rows="2" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..</textarea>
+                    </div>
+
+                    <div style="margin-bottom: 15px; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;">
+                            <i class="fas fa-bell me-1"></i> Admin (Size Gelen) Bildirim Şablonu:
+                        </label>
+                        <p style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:8px;">
+                            Kullanabileceğiniz etiketler: <code style="color:#a78bfa;">{grup_ismi}</code>, <code style="color:#a78bfa;">{post_url}</code>, <code style="color:#a78bfa;">{eksik_sayisi}</code>, <code style="color:#a78bfa;">{toplam_uye}</code>, <code style="color:#a78bfa;">{saat}</code>, <code style="color:#a78bfa;">{post_tarihi}</code>, <code style="color:#a78bfa;">{eksik_listesi}</code>
+                        </p>
+                        <textarea id="global_admin_notify_template" rows="5" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">✅ Otomasyon tamamlandı!
+
+📌 Grup: {grup_ismi}
+🔗 Post: {post_url}
+📅 Paylaşım Tarihi: {post_tarihi}
+
+👥 Toplam üye: {toplam_uye}
+❌ Eksik: {eksik_sayisi}
+⏰ Saat: {saat}</textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-success" onclick="saveGlobalAutomationSettings()">
+                            <i class="fas fa-save me-1"></i> Global Ayarları Kaydet
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="liveTestAutomation()" style="background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;">
+                            <i class="fas fa-bolt me-1"></i> Tüm Aktif Grupları Canlı Test Et
+                        </button>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                    <button type="button" class="btn btn-warning" id="globalAutomationToggleBtn" onclick="toggleGlobalAutomation()">
+                        <i class="fas fa-power-off"></i> <span>Durumu Alınıyor...</span>
+                    </button>
                     <button type="button" class="btn btn-primary" onclick="loadAutomationGroups()" id="loadAutomationBtn">
                         <i class="fas fa-sync-alt me-1"></i> Grupları Listele
                     </button>

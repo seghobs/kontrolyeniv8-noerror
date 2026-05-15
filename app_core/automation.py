@@ -8,12 +8,6 @@ import uuid
 
 import pytz
 import requests
-try:
-    from curl_cffi import requests as curl_requests
-    _CURL_AVAILABLE = True
-except ImportError:
-    curl_requests = requests  # fallback
-    _CURL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -66,23 +60,15 @@ def _get_user_id_by_username(username, token_record):
     from app_core.instagram_api import build_auth_headers
     headers = build_auth_headers(token, user_agent, android_id, device_id, username=username)
     try:
-        if _CURL_AVAILABLE:
-            resp = curl_requests.get(
-                f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                headers=headers,
-                timeout=10,
-                impersonate="chrome110",
-            )
-        else:
-            resp = requests.get(
-                f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}",
-                headers=headers,
-                timeout=10,
-            )
+        resp = requests.get(
+            f"https://i.instagram.com/api/v1/users/{username}/usernameinfo/",
+            headers=headers,
+            timeout=10,
+        )
         from app_core.instagram_api import _update_session_from_response
         _update_session_from_response(token_record.get("username", ""), resp)
         data = resp.json()
-        user_id = data.get("data", {}).get("user", {}).get("id")
+        user_id = data.get("user", {}).get("pk")
         return str(user_id) if user_id else None
     except Exception as e:
         logger.error("User ID alima hatasi (%s): %s", username, e)
@@ -106,21 +92,12 @@ def _send_dm_to_user(recipient_user_id, text, token_record):
         "client_context": str(uuid.uuid4()),
     }
     try:
-        if _CURL_AVAILABLE:
-            resp = curl_requests.post(
-                "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
-                headers=headers,
-                data=payload,
-                timeout=15,
-                impersonate="chrome110",
-            )
-        else:
-            resp = requests.post(
-                "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
-                headers=headers,
-                data=payload,
-                timeout=15,
-            )
+        resp = requests.post(
+            "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
+            headers=headers,
+            data=payload,
+            timeout=15,
+        )
         from app_core.instagram_api import _update_session_from_response
         _update_session_from_response(token_record.get("username", ""), resp)
         logger.info("Bildirim DM sonucu user=%s status=%s", recipient_user_id, resp.status_code)
@@ -146,21 +123,12 @@ def _send_dm(thread_id, text, token_record):
         "client_context": str(uuid.uuid4()),
     }
     try:
-        if _CURL_AVAILABLE:
-            resp = curl_requests.post(
-                "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
-                headers=headers,
-                data=payload,
-                timeout=15,
-                impersonate="chrome110",
-            )
-        else:
-            resp = requests.post(
-                "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
-                headers=headers,
-                data=payload,
-                timeout=15,
-            )
+        resp = requests.post(
+            "https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/",
+            headers=headers,
+            data=payload,
+            timeout=15,
+        )
         from app_core.instagram_api import _update_session_from_response
         _update_session_from_response(token_record.get("username", ""), resp)
         logger.info("DM sonucu thread=%s status=%s", thread_id, resp.status_code)
@@ -179,19 +147,11 @@ def _fetch_comment_usernames(media_id, token_record):
     from app_core.instagram_api import build_auth_headers
     headers = build_auth_headers(token, user_agent, android_id, device_id, username=username)
     try:
-        if _CURL_AVAILABLE:
-            resp = curl_requests.get(
-                f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
-                headers=headers,
-                timeout=10,
-                impersonate="chrome110",
-            )
-        else:
-            resp = requests.get(
-                f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
-                headers=headers,
-                timeout=10,
-            )
+        resp = requests.get(
+            f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
+            headers=headers,
+            timeout=10,
+        )
         from app_core.instagram_api import _update_session_from_response
         _update_session_from_response(token_record.get("username", ""), resp)
         data = resp.json()
@@ -219,19 +179,11 @@ def _fetch_comment_details(media_id, token_record):
     from app_core.instagram_api import build_auth_headers
     headers = build_auth_headers(token, user_agent, android_id, device_id, username=username)
     try:
-        if _CURL_AVAILABLE:
-            resp = curl_requests.get(
-                f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
-                headers=headers,
-                timeout=10,
-                impersonate="chrome110",
-            )
-        else:
-            resp = requests.get(
-                f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
-                headers=headers,
-                timeout=10,
-            )
+        resp = requests.get(
+            f"https://i.instagram.com/api/v1/media/{media_id}/stream_comments/",
+            headers=headers,
+            timeout=10,
+        )
         from app_core.instagram_api import _update_session_from_response
         _update_session_from_response(token_record.get("username", ""), resp)
         comments_disabled = False
@@ -263,8 +215,8 @@ def _fetch_comment_details(media_id, token_record):
         return set(), 0, False
 
 
-def run_automation_for_thread(thread_id):
-    logger.info("Otomasyon baslatildi: %s", thread_id)
+def run_automation_for_thread(thread_id, test_mode=False):
+    logger.info("Otomasyon baslatildi: %s (test_mode=%s)", thread_id, test_mode)
 
     try:
         from app_core.token_service import get_working_active_token
@@ -370,8 +322,21 @@ def run_automation_for_thread(thread_id):
         if is_global_exempted(member):
             all_exempted.add(member)
 
-    # 5. Eksikler = üyeler - muaflar - yorum yapanlar
-    eksikler = member_usernames - all_exempted - hedef_commenters
+    # 5. Eksikler hesapla
+    from app_core.automation import load_automations
+    automations = load_automations()
+    config = automations.get(str(thread_id), {})
+    control_method = config.get("control_method", "all_members")
+    
+    if control_method == "post_senders":
+        post_senders = {_normalize(p.get("username", "")) for p in posts if p.get("username")}
+        base_users = post_senders
+        logger.info("Otomasyon: 'Sadece Paylasim Yapanlar' yontemi kullaniliyor. %d kisi bekleniyor.", len(base_users))
+    else:
+        base_users = member_usernames
+        logger.info("Otomasyon: 'Tum Uyeler' yontemi kullaniliyor. %d kisi bekleniyor.", len(base_users))
+
+    eksikler = base_users - all_exempted - hedef_commenters
 
     if not eksikler:
         logger.info("Otomasyon: herkes yorumunu yapmis, eksik yok.")
@@ -379,40 +344,81 @@ def run_automation_for_thread(thread_id):
 
     logger.info("Otomasyon: %d eksik bulundu, DM gönderiliyor.", len(eksikler))
 
-    # 6. Mesajları gönder
-    msg1 = "\n".join(f"@{u}" for u in sorted(eksikler))
-    _send_dm(thread_id, msg1, token_record)
-    time.sleep(3)
+    # 6. Mesajları hazırla ve gönder
+    from app_core.storage import get_global_automation_settings
+    global_settings = get_global_automation_settings()
+    
+    group_name = config.get("group_name", str(thread_id))
+    post_url = f"https://www.instagram.com/p/{hedef_post.get('code', '')}/"
+    toplam_uye_str = str(len(member_usernames))
+    eksik_sayisi_str = str(len(eksikler))
+    saat_str = datetime.datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M')
+    post_tarihi_str = hedef_post.get("date", "Bilinmiyor")
+    
+    # Eksik listesini @ işaretiyle alt alta oluştur
+    eksik_listesi_str = "\n".join(f"@{u}" for u in sorted(eksikler)) if eksikler else "Eksik yok"
 
-    _send_dm(thread_id, "grup eksikleri", token_record)
-    time.sleep(3)
+    def _format_template(text):
+        if not text: return ""
+        return text.replace("{grup_ismi}", group_name) \
+                   .replace("[Grubun İsmi]", group_name) \
+                   .replace("{post_url}", post_url) \
+                   .replace("{toplam_uye}", toplam_uye_str) \
+                   .replace("{eksik_sayisi}", eksik_sayisi_str) \
+                   .replace("{saat}", saat_str) \
+                   .replace("{post_tarihi}", post_tarihi_str) \
+                   .replace("{eksik_listesi}", eksik_listesi_str)
 
-    config = load_automations().get(str(thread_id), {})
-    template = config.get(
+    template_raw = global_settings.get(
         "template",
-        "@everyone eksik listesindeki tüm arkadaşlarımıza dm üzerinden yazdık "
-        "dönüş yapmayanlar gruptan çıkarılacaktır.",
+        "@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız."
     )
-    _send_dm(thread_id, template, token_record)
-    time.sleep(2)
+    template_formatted = _format_template(template_raw)
+    combined_msg = f"{eksik_listesi_str}\n\neksikler\n\n{template_formatted}" if eksikler else ""
+
+    send_to_group = global_settings.get("send_to_group", True)
+    if send_to_group and not test_mode:
+        if combined_msg:
+            _send_dm(thread_id, combined_msg, token_record)
+            time.sleep(2)
+            logger.info("Otomasyon: Eksik listesi gruba gonderildi.")
+    else:
+        logger.info("Otomasyon: Gruba mesaj atma kapali veya test modunda, atlanildi.")
+
+    # 6.5 Eksiklere DM at
+    send_dm_to_missing = global_settings.get("send_dm_to_missing", True)
+    if send_dm_to_missing and not test_mode:
+        dm_template_raw = global_settings.get("dm_template", "Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..")
+        dm_message = _format_template(dm_template_raw)
+        
+        logger.info("Otomasyon: Eksik kisilere tek tek DM atilmaya baslaniyor...")
+        for u in sorted(eksikler):
+            uid = _get_user_id_by_username(u, token_record)
+            if uid:
+                _send_dm_to_user(uid, dm_message, token_record)
+                logger.info("Otomasyon: @%s kullanicisina DM gonderildi.", u)
+                time.sleep(5)  # Yavaş yavaş atsın
+            else:
+                logger.warning("Otomasyon: @%s icin user_id alinamadi, DM atlanildi.", u)
+    else:
+        logger.info("Otomasyon: Bireysel DM atma kapali, atlanildi.")
 
     # 7. Admin / sahip hesabına bildirim gönder
     notify_username = config.get("notify_username", "seghob")
     if notify_username:
-        post_url = f"https://www.instagram.com/p/{hedef_post.get('code', '')}/"
-        group_name = config.get("group_name", thread_id)
-        notify_text = (
-            f"✅ Otomasyon tamamlandı!\n\n"
-            f"📌 Grup: {group_name}\n"
-            f"🔗 Kontrol edilen paylaşım:\n{post_url}\n\n"
-            f"👥 Toplam üye: {len(member_usernames)}\n"
-            f"❌ Eksik yorum: {len(eksikler)}\n"
-            f"⏰ Saat: {datetime.datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M')} (GMT+3)"
-        )
+        admin_notify_template = global_settings.get("admin_notify_template", "✅ Otomasyon tamamlandı!\n\n📌 Grup: {grup_ismi}\n🔗 Post: {post_url}\n\n👥 Toplam üye: {toplam_uye}\n❌ Eksik: {eksik_sayisi}\n⏰ Saat: {saat}")
+        notify_text = _format_template(admin_notify_template)
         user_id = _get_user_id_by_username(notify_username, token_record)
         if user_id:
+            # Önce kopyalanabilir eksik listesini atalim
+            if eksikler and combined_msg:
+                _send_dm_to_user(user_id, combined_msg, token_record)
+                logger.info("Eksik listesi ve grup sablonu @%s hesabina gonderildi.", notify_username)
+                time.sleep(3)
+                
+            # Ardından ana bildirim raporunu atalim
             _send_dm_to_user(user_id, notify_text, token_record)
-            logger.info("Bildirim @%s hesabina gonderildi.", notify_username)
+            logger.info("Bildirim raporu @%s hesabina gonderildi.", notify_username)
         else:
             logger.warning("Bildirim icin @%s user_id alinamadi.", notify_username)
 
@@ -426,6 +432,14 @@ def _automation_worker():
 
     while True:
         try:
+            from app_core.storage import get_global_automation_status, get_global_automation_settings
+            if not get_global_automation_status():
+                time.sleep(30)
+                continue
+
+            global_settings = get_global_automation_settings()
+            target_times = [t.strip() for t in global_settings.get("times", "").split(",") if t.strip()]
+
             now = datetime.datetime.now(tz)
             current_time = now.strftime("%H:%M")
             current_date = now.strftime("%Y-%m-%d")
@@ -434,10 +448,10 @@ def _automation_worker():
             for thread_id, config in automations.items():
                 if not config.get("is_active"):
                     continue
-                target_time = config.get("time", "")
-                if target_time == current_time:
-                    if last_run_date.get(thread_id) != current_date:
-                        last_run_date[thread_id] = current_date
+                if current_time in target_times:
+                    run_key = f"{thread_id}_{current_time}"
+                    if last_run_date.get(run_key) != current_date:
+                        last_run_date[run_key] = current_date
                         logger.info(
                             "Otomasyon tetiklendi: thread=%s saat=%s", thread_id, current_time
                         )
@@ -453,8 +467,24 @@ def _automation_worker():
         time.sleep(30)
 
 
+_WORKER_THREAD = None
+
 def start_automation():
     """Flask başlarken çağrılır; arka plan thread'ini başlatır."""
-    t = threading.Thread(target=_automation_worker, daemon=True)
-    t.start()
-    logger.info("Otomasyon zamanlayici baslatildi.")
+    from app_core.storage import get_global_automation_status
+    if not get_global_automation_status():
+        return
+
+    global _WORKER_THREAD
+    if _WORKER_THREAD is not None and _WORKER_THREAD.is_alive():
+        return
+
+    # Sadece gerçek uWSGI worker'ında, PythonAnywhere'de veya Flask reloader worker'ında başlat
+    if os.environ.get('SERVER_SOFTWARE', '').startswith('uWSGI') or \
+       os.environ.get('PYTHONANYWHERE_DOMAIN') or \
+       os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        _WORKER_THREAD = threading.Thread(target=_automation_worker, daemon=True)
+        _WORKER_THREAD.start()
+        logger.info("Otomasyon zamanlayici baslatildi.")
+    else:
+        logger.info("Otomasyon zamanlayici ana reloader isleminde atlandi.")

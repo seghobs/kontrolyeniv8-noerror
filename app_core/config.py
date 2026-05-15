@@ -16,7 +16,7 @@ IG_APP_ID = "567067343352427"
 class BaseConfig:
     APP_ENV = os.getenv("APP_ENV", "dev")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "seho")
-    SECRET_KEY = os.getenv("SECRET_KEY", "") or secrets.token_hex(32)
+    SECRET_KEY = os.getenv("SECRET_KEY", "sbt_seghob_gizli_anahtar_12345")
     HEALTH_CHECK_ENABLED = os.getenv("HEALTH_CHECK_ENABLED", "1") == "1"
     HEALTH_CHECK_INTERVAL_SECONDS = int(os.getenv("HEALTH_CHECK_INTERVAL_SECONDS", "180"))
     SESSION_COOKIE_HTTPONLY = True

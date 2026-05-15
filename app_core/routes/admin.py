@@ -683,20 +683,20 @@ def save_automation_route():
         
     data = request.get_json() or {}
     thread_id = data.get("thread_id")
-    time_str = data.get("time")
     is_active = data.get("is_active", False)
     group_name = data.get("group_name", "Bilinmeyen Grup")
     notify_username = data.get("notify_username", "seghob").strip().lstrip("@")
+    control_method = data.get("control_method", "all_members")
     
-    if not thread_id or not time_str:
-        return api_response(False, "ERROR", "Thread ID ve zaman zorunlu.")
+    if not thread_id:
+        return api_response(False, "ERROR", "Thread ID zorunlu.")
         
     automations = load_automations()
     automations[str(thread_id)] = {
-        "time": time_str,
         "is_active": is_active,
         "group_name": group_name,
         "notify_username": notify_username,
+        "control_method": control_method,
     }
     save_automations(automations)
     return api_response(True, "OK", "Otomasyon ayarlari kaydedildi.")
@@ -718,6 +718,93 @@ def trigger_automation_route():
     t = threading.Thread(target=run_automation_for_thread, args=(str(thread_id),), daemon=True)
     t.start()
     return api_response(True, "OK", f"Otomasyon tetiklendi (arka planda calisuyor): {thread_id}")
+
+
+@admin_bp.route("/test_admin_notification", methods=["POST"])
+def test_admin_notification_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json() or {}
+    group_name = data.get("group_name", "Test Grubu")
+    notify_username = data.get("notify_username", "seghob")
+
+    if not notify_username:
+        return api_response(False, "ERROR", "Bildirim gonderilecek kullanici adi yok.")
+
+    token_record = get_working_active_token()
+    if not token_record:
+        return api_response(False, "ERROR", "Aktif token bulunamadi.")
+
+    import datetime, pytz
+    from app_core.storage import get_global_automation_settings
+    from app_core.automation import _get_user_id_by_username, _send_dm_to_user
+
+    global_settings = get_global_automation_settings()
+    admin_notify_template = global_settings.get("admin_notify_template", "✅ Otomasyon tamamlandı!\n\n📌 Grup: {grup_ismi}\n🔗 Post: {post_url}\n\n👥 Toplam üye: {toplam_uye}\n❌ Eksik: {eksik_sayisi}\n⏰ Saat: {saat}")
+    
+    post_url = "https://www.instagram.com/p/TEST_POST/"
+    toplam_uye_str = "150"
+    eksik_sayisi_str = "5"
+    saat_str = datetime.datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M')
+    post_tarihi_str = f"{datetime.datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%d %B %H:%M')}"
+    eksik_listesi_str = "@kullanici1\n@kullanici2\n@kullanici3\n@kullanici4\n@kullanici5"
+
+    notify_text = admin_notify_template.replace("{grup_ismi}", str(group_name)) \
+        .replace("[Grubun İsmi]", str(group_name)) \
+        .replace("{post_url}", str(post_url)) \
+        .replace("{toplam_uye}", toplam_uye_str) \
+        .replace("{eksik_sayisi}", eksik_sayisi_str) \
+        .replace("{saat}", saat_str) \
+        .replace("{post_tarihi}", post_tarihi_str) \
+        .replace("{eksik_listesi}", eksik_listesi_str)
+        
+    template_raw = global_settings.get(
+        "template",
+        "@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız."
+    )
+    # _format_template logic replicated here for the template:
+    template_formatted = template_raw.replace("{grup_ismi}", str(group_name)) \
+        .replace("[Grubun İsmi]", str(group_name)) \
+        .replace("{post_url}", str(post_url)) \
+        .replace("{toplam_uye}", toplam_uye_str) \
+        .replace("{eksik_sayisi}", eksik_sayisi_str) \
+        .replace("{saat}", saat_str) \
+        .replace("{post_tarihi}", post_tarihi_str)
+        
+    combined_msg = f"{eksik_listesi_str}\n\neksikler\n\n{template_formatted}"
+        
+    user_id = _get_user_id_by_username(notify_username, token_record)
+    if not user_id:
+        return api_response(False, "ERROR", f"@{notify_username} kullanici adi bulunamadi veya erisilemiyor.")
+        
+    _send_dm_to_user(user_id, combined_msg, token_record)
+    import time
+    time.sleep(3)
+    _send_dm_to_user(user_id, notify_text, token_record)
+    return api_response(True, "OK", "Test bildirimi ve ayri kopyalanabilir grup mesaji gonderildi.")
+
+@admin_bp.route("/live_test_automation", methods=["POST"])
+def live_test_automation_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+        
+    from app_core.automation import load_automations, run_automation_for_thread
+    import threading
+    
+    autos = load_automations()
+    active_threads = [tid for tid, cfg in autos.items() if cfg.get("is_active")]
+    
+    if not active_threads:
+        return api_response(False, "ERROR", "Sistemde aktif edilmiş hiçbir otomasyon grubu bulunamadı.")
+        
+    for tid in active_threads:
+        t = threading.Thread(target=run_automation_for_thread, args=(str(tid), True), daemon=True)
+        t.start()
+        
+    return api_response(True, "OK", f"{len(active_threads)} aktif grup için CANLI TEST başlatıldı. Gruplara veya üyelere mesaj gitmeyecek, sadece admine eksik raporu iletilecek.")
 @admin_bp.route("/unsend_messages", methods=["POST"])
 def unsend_messages_route():
     auth_error = _require_admin()
@@ -761,3 +848,59 @@ def unsend_messages_route():
         f"{deleted} mesaj geri alindi, {failed} basarisiz.",
         extra={"deleted": deleted, "failed": failed}
     )
+
+
+@admin_bp.route("/get_global_automation_status", methods=["GET"])
+def get_global_automation_status_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    from app_core.storage import get_global_automation_status
+    status = get_global_automation_status()
+    return api_response(True, "OK", "Basarili", extra={"is_active": status})
+
+
+@admin_bp.route("/toggle_global_automation", methods=["POST"])
+def toggle_global_automation_route():
+    auth_error = _require_admin()
+    if auth_error:
+        return auth_error
+    from app_core.storage import get_global_automation_status, set_global_automation_status
+    current = get_global_automation_status()
+    new_status = not current
+    set_global_automation_status(new_status)
+    
+    if new_status:
+        from app_core.automation import start_automation
+        start_automation()
+        
+    status_str = "aktif" if new_status else "pasif"
+    return api_response(True, "OK", f"Global otomasyon {status_str} yapildi.", extra={"is_active": new_status})
+
+
+@admin_bp.route("/get_global_automation_settings", methods=["GET"])
+def get_global_automation_settings_route():
+    auth_error = _require_admin()
+    if auth_error: return auth_error
+    from app_core.storage import get_global_automation_settings
+    settings = get_global_automation_settings()
+    return api_response(True, "OK", "Ayarlar", extra={"settings": settings})
+
+
+@admin_bp.route("/save_global_automation_settings", methods=["POST"])
+def save_global_automation_settings_route():
+    auth_error = _require_admin()
+    if auth_error: return auth_error
+    data = request.get_json() or {}
+    from app_core.storage import set_global_automation_settings
+    settings = {
+        "times": data.get("times", "23:59"),
+        "send_to_group": data.get("send_to_group", True),
+        "template": data.get("template", ""),
+        "send_dm_to_missing": data.get("send_dm_to_missing", True),
+        "dm_template": data.get("dm_template", ""),
+        "admin_notify_template": data.get("admin_notify_template", "")
+    }
+    set_global_automation_settings(settings)
+    return api_response(True, "OK", "Global otomasyon ayarlari kaydedildi.")
+
