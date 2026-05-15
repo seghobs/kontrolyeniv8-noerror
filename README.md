@@ -26,12 +26,12 @@ Bu proje, **Instagram yardımlaşma ve etkileşim gruplarını** profesyonel bir
 
 ### Tek Komutla Kurulum (Linux/Bash/PythonAnywhere)
 ```bash
-bash -c "$(curl -sL https://raw.githubusercontent.com/seghobs/kontrolvipv7/main/setup.sh)"
+bash -c "$(curl -sL https://raw.githubusercontent.com/seghobs/kontrolyeniv8-noerror/main/setup.sh)"
 ```
 
 ### Manuel Kurulum
 ```bash
-git clone https://github.com/seghobs/kontrolvipv7.git kontrol
+git clone https://github.com/seghobs/kontrolyeniv8-noerror.git kontrol
 cd kontrol
 pip install -r requirements.txt
 python flask_app.py
